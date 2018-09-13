@@ -9,6 +9,6 @@ urlpatterns = [
     url(r'^topic.like$', TopicLikeCreate.as_view()),
     url(r'^comment.create$', CommentCreate.as_view()),
     url(r'^comment.list$', CommentList.as_view()),
-    url(r'^auth.login$',authorization),
+    url(r'^auth.login$', authorization),
     url(r'^auth.logout$', logout_view)
 ]

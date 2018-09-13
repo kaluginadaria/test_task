@@ -1,14 +1,18 @@
 import datetime
 
 from django.contrib.auth import authenticate, login, logout
-from django.http import HttpResponse, JsonResponse
+from django.db.models import F
+from django.http import JsonResponse
+from django.shortcuts import render
 from rest_framework import generics
-
+from rest_framework.permissions import IsAuthenticated
+from habr.api.forms import AuthorizationForm
 from habr.api.serializers import *
 
 
 class TopicList(generics.ListAPIView):
     serializer_class = TopicSerializer
+    permission_classes = (IsAuthenticated,)
 
     def get_queryset(self):
         limit = 100
@@ -23,6 +27,7 @@ class TopicList(generics.ListAPIView):
 
 class TopicCreate(generics.CreateAPIView):
     serializer_class = TopicSerializer
+    permission_classes = (IsAuthenticated,)
 
     def perform_create(self, serializer):
         serializer.save(creator_id=self.request.user)
@@ -33,6 +38,7 @@ class TopicCreate(generics.CreateAPIView):
 
 class TopicLikeCreate(generics.CreateAPIView):
     serializer_class = TopicLikeSerializer
+    permission_classes = (IsAuthenticated,)
 
     def perform_create(self, serializer):
         timeout = 10
@@ -43,21 +49,17 @@ class TopicLikeCreate(generics.CreateAPIView):
 
             is_liked = True
         except Exception as e:
-
             is_liked = False
-        topic = Topic.objects.get(id=topic_id)
 
         if is_liked:
 
             if (datetime.datetime.now().timestamp() - topic_like.created.timestamp()) < timeout:
                 topic_like.delete()
-                topic.number_of_likes -= 1
-
+                Topic.objects.filter(id=topic_id).update(number_of_likes=F('number_of_likes') - 1)
         else:
+            Topic.objects.filter(id=topic_id).update(number_of_likes=F('number_of_likes') + 1)
 
-            topic.number_of_likes += 1
             serializer.save(user_id=self.request.user)
-        topic.save()
 
     def post(self, request, *args, **kwargs):
         return self.create(request, *args, **kwargs)
@@ -65,12 +67,11 @@ class TopicLikeCreate(generics.CreateAPIView):
 
 class CommentCreate(generics.CreateAPIView):
     serializer_class = CommentSerializer
+    permission_classes = (IsAuthenticated,)
 
     def perform_create(self, serializer):
         topic_id = int(self.request.POST['topic_id'])
-        topic = Topic.objects.get(id=topic_id)
-        topic.number_of_comments += 1
-        topic.save()
+        Topic.objects.filter(id=topic_id).update(number_of_comments=F('number_of_comments') + 1)
         serializer.save(creator_id=self.request.user)
 
     def post(self, request, *args, **kwargs):
@@ -79,6 +80,7 @@ class CommentCreate(generics.CreateAPIView):
 
 class CommentList(generics.ListAPIView):
     serializer_class = CommentSerializer
+    permission_classes = (IsAuthenticated,)
 
     def get_queryset(self):
         limit = 100
@@ -91,26 +93,33 @@ class CommentList(generics.ListAPIView):
         return Comment.objects.all()[offset:offset + limit]
 
 
-def jwt_response_payload_handler(request):
-    authorization(request)
-    return HttpResponse("ok")
-
-
 def authorization(request):
-    username = request.POST['username']
-    password = request.POST['password']
-    user = authenticate(request, username=username, password=password)
-    if user is not None:
-        login(request, user)
+    if request.method == 'POST':
+        # create a form instance and populate it with data from the request:
+        form = AuthorizationForm(request.POST)
+        # check whether it's valid:
+        if form.is_valid():
+            username = request.POST['username']
+            password = request.POST['password']
+            user = authenticate(request, username=username, password=password)
+            if user is not None:
+                login(request, user)
+                return JsonResponse({
+                    "id": user.id,
+                    "username": user.username,
+                    "first_name": user.first_name,
+                    "last_name": user.last_name,
+                    "email": user.email,
+                    "date_joined": user.date_joined
+                })
+            else:
+                return JsonResponse({
+                    'code': '401'
+                })
+    else:
+        form = AuthorizationForm()
 
-    return JsonResponse({
-        "id": user.id,
-        "username": user.username,
-        "first_name": user.first_name,
-        "last_name": user.last_name,
-        "email": user.email,
-        "date_joined": user.date_joined
-    })
+    return render(request, 'authorization.html', {'form': form})
 
 
 def logout_view(request):
